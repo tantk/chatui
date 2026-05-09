@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev:web": "vite",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "uv run uvicorn server.main:app --reload --port 8090",
     "dev": "concurrently -n web,server -c blue,green \"npm:dev:web\" \"npm:dev:server\"",
-    "build": "tsc -p tsconfig.server.json && vite build",
-    "start": "node dist-server/server/index.js",
-    "smoke": "tsx tests/smoke/bootstrap-smoke.ts"
+    "build": "vite build",
+    "start": "uv run uvicorn server.main:app --port 8090",
+    "smoke": "uv run python tests/smoke/bootstrap_smoke.py"
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.173.0",

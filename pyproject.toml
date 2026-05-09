@@ -1,0 +1,18 @@
+[project]
+name = "genphone-server"
+version = "0.0.1"
+description = "Generative Phone — backend"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-dotenv>=1.0",
+    "pydantic>=2.9",
+    "google-adk>=1.0",
+    "google-genai>=1.0",
+    "langsmith>=0.2",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false
