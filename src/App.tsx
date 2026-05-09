@@ -1,54 +1,63 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { PhoneFrame } from "./shell/PhoneFrame";
+import { HomeScreen } from "./shell/HomeScreen";
+import { NewChatScreen } from "./shell/NewChatScreen";
+import { BootstrapView } from "./shell/BootstrapView";
+import { AppView } from "./shell/AppView";
+import { storage } from "./lib/storage";
 import { bootstrap } from "./lib/api";
-import { Renderer } from "./renderer/Renderer";
 import type { App } from "./lib/types";
 
-export default function App() {
-  const [app, setApp] = useState<App | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [input, setInput] = useState("track my marathon training, 4 runs a week");
-  const [error, setError] = useState<string | null>(null);
+type Screen =
+  | { kind: "home" }
+  | { kind: "newchat" }
+  | { kind: "bootstrapping"; message: string }
+  | { kind: "app"; id: string };
 
-  async function go() {
-    setLoading(true);
-    setError(null);
+export default function App() {
+  const [apps, setApps] = useState<App[]>(() => storage.loadApps());
+  const [screen, setScreen] = useState<Screen>({ kind: "home" });
+
+  useEffect(() => {
+    storage.saveApps(apps);
+  }, [apps]);
+
+  async function handleNewChatSubmit(message: string) {
+    setScreen({ kind: "bootstrapping", message });
     try {
-      const a = await bootstrap(input);
-      setApp(a);
+      const newApp = await bootstrap(message);
+      setApps((prev) => [...prev, newApp]);
+      setScreen({ kind: "app", id: newApp.id });
     } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setLoading(false);
+      alert((e as Error).message);
+      setScreen({ kind: "newchat" });
     }
   }
 
   return (
-    <div className="min-h-screen p-6 max-w-3xl mx-auto">
-      <h1 className="text-3xl font-semibold mb-6">Generative Phone — smoke UI</h1>
-      <div className="flex gap-2 mb-4">
-        <input
-          className="flex-1 rounded bg-neutral-800 px-3 py-2 text-sm"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
+    <PhoneFrame>
+      {screen.kind === "home" && (
+        <HomeScreen
+          apps={apps}
+          onOpen={(id) => setScreen({ kind: "app", id })}
+          onNewChat={() => setScreen({ kind: "newchat" })}
         />
-        <button
-          className="rounded bg-green-600 px-4 py-2 text-sm font-medium disabled:opacity-50"
-          onClick={go}
-          disabled={loading}
-        >
-          {loading ? "..." : "Generate"}
-        </button>
-      </div>
-      {error && <div className="rounded bg-red-900/40 p-3 text-sm text-red-300">{error}</div>}
-      {app && (
-        <div className="mt-6 rounded-3xl bg-neutral-950 border border-neutral-800 p-4">
-          <div className="mb-3 flex items-center gap-2 text-lg font-medium">
-            <span>{app.icon}</span>
-            <span>{app.name}</span>
-          </div>
-          <Renderer tree={app.tree} data={app.data} />
-        </div>
       )}
-    </div>
+      {screen.kind === "newchat" && (
+        <NewChatScreen
+          onSubmit={handleNewChatSubmit}
+          onBack={() => setScreen({ kind: "home" })}
+        />
+      )}
+      {screen.kind === "bootstrapping" && <BootstrapView message={screen.message} />}
+      {screen.kind === "app" && (
+        <AppView
+          appId={screen.id}
+          apps={apps}
+          setApps={setApps}
+          onHome={() => setScreen({ kind: "home" })}
+        />
+      )}
+    </PhoneFrame>
   );
 }
