@@ -1,10 +1,11 @@
+import type { ReactElement } from "react";
 import type { WidgetNode } from "../lib/types";
 import { WIDGETS } from "./widgets";
 
 type Props = { tree: WidgetNode; data: Record<string, unknown>; backendUrl?: string | null };
 
 export function Renderer({ tree, data, backendUrl = null }: Props) {
-  function renderNode(node: WidgetNode): JSX.Element {
+  function renderNode(node: WidgetNode): ReactElement {
     const Comp = WIDGETS[node.type];
     if (!Comp) {
       return (

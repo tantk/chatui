@@ -1,8 +1,9 @@
+import type { ReactElement } from "react";
 import type { WidgetNode } from "../../lib/types";
 
 type Props = {
   node: WidgetNode;
-  renderChild: (n: WidgetNode) => JSX.Element;
+  renderChild: (n: WidgetNode) => ReactElement;
 };
 
 export function Container({ node, renderChild }: Props) {
