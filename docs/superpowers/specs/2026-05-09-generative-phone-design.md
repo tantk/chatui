@@ -92,7 +92,7 @@ The bootstrap prompt includes a catalog of these widgets with one-line descripti
 
 ### 4. Agent layer
 
-Single Anthropic API call per chat turn. Two prompt modes:
+Single Google Gemini API call per chat turn, wrapped in LangSmith tracing. Two prompt modes:
 
 #### Bootstrap (required)
 
@@ -106,7 +106,9 @@ Single Anthropic API call per chat turn. Two prompt modes:
 - **Output:** full new tree + (optionally) data delta.
 - Only built if time permits after the bootstrap path is solid. The committed demo arc does not depend on mutation working.
 
-Model: **Claude Sonnet 4.6** (`claude-sonnet-4-6`) for cost and speed; fall back to **Opus 4.7** (`claude-opus-4-7`) only if Sonnet's structured-output reliability is insufficient. Use prompt caching for the static system prompt + widget catalog (large, identical across calls — high hit rate, meaningful savings even within a 6h session).
+Model: **Gemini Pro** (latest stable — verify exact ID when keys are issued) for the bootstrap call (quality matters, only one call per app). Fall back to **Gemini Flash** if Pro latency is too slow for the 5s skeleton goal on demo recording. Structured output via `responseMimeType: "application/json"` + `responseSchema` matching the `{name, icon, tree, data}` shape.
+
+**Observability:** all LLM calls wrapped with LangSmith's `traceable`. Project name `genphone-hackathon`. Traces double as live debugging during the build (when an app generates weirdly, click the trace, see the prompt + response without printf-debugging).
 
 ## Data model
 
@@ -139,7 +141,8 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | Build tool | Vite |
 | Framework | React 18 + TypeScript |
 | Styling | Tailwind |
-| LLM | `@anthropic-ai/sdk`, Sonnet 4.6 default |
+| LLM | `@google/generative-ai` SDK, Gemini Pro default (Flash fallback for speed) |
+| Observability | `langsmith` SDK — `traceable` wrapper around every LLM call |
 | Charts | Recharts |
 | Map | Leaflet + react-leaflet |
 | Calendar | react-day-picker |
@@ -167,13 +170,14 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | All three apps look samey (agent defaults to lists) | high if prompt is weak | Bootstrap system prompt explicitly nudges toward the most distinctive primitive for the inferred domain; few-shot includes the trio's expected layouts |
 | Widget library too sparse for the trio | medium | The 15 primitives were chosen specifically to span the trio. Any cuts come from primitives outside the trio. |
 | Vite + Tailwind + Leaflet integration friction | low | All three are well-trodden; Leaflet's only known gotcha is its CSS, which is an `import` line |
-| Anthropic API key not in env | low | Add `.env.local` with `VITE_ANTHROPIC_API_KEY` — and verify `.gitignore` covers it before any commit (per global rule on secrets) |
+| API keys not in env | low | Add `.env.local` with `VITE_GEMINI_API_KEY` and `VITE_LANGSMITH_API_KEY` — and verify `.gitignore` covers it before any commit (per global rule on secrets) |
+| Gemini structured-output schema drift | medium | Gemini's JSON-schema mode is good but occasionally emits fields not in the schema. Mitigation: schema validation already in renderer + retry once with the validation error in the next prompt |
 
 ## Success criteria
 
 - **Functional:** Three apps generate from three first-messages, persist across reload, and look visibly different. Each has interactive widgets that don't crash on tap.
 - **Demo:** A 90-second video matching the demo arc above can be recorded in one take.
-- **Submission:** Public GitHub repo, demo video link, working app deployed (Vercel / Netlify), submission form completed by 5:45 PM local.
+- **Submission:** Public GitHub repo, demo video link, working app deployed (Vercel preferred for speed; Firebase Hosting if we want to lean Google for the sponsor angle), submission form completed by 5:45 PM local. Submission "protocols used" field: A2UI + LangSmith.
 - **Theme:** A judge can answer "would this have been impossible with a chat interface?" with an obvious yes after watching the video for 10 seconds.
 
 ## Open questions
@@ -181,5 +185,6 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 None blocking. Items deferred to implementation:
 
 - Exact A2UI tree shape — finalize after inspecting the starter kit at build start. If A2UI's published shape works, use it as-is and list "A2UI" on the submission form. If it's unworkable in 6h, build a minimal in-house tree shape and list "custom JSON tree" honestly — do NOT claim A2UI on the submission unless we are actually conforming to it.
+- Exact Gemini model ID — verify against current Vertex AI / Google AI Studio offerings when API keys are in hand. Default to current Gemini Pro; switch to Flash if Pro latency exceeds ~10s end-to-end.
 - Icon strategy — emoji is the default, but if there's time, an LLM-picked Lucide icon set would look more polished.
 - Streaming UX — partial render of the tree while tokens arrive vs. wait-and-show. Decide at hour 3.
