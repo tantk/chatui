@@ -175,6 +175,7 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | Observability | `langsmith` SDK — `traceable` wrapper around every LLM call |
 | Hosting | Google Cloud Run, `gcloud run deploy --source .`, `--min-instances=1` during demo to avoid cold start |
 | Auth (Vertex AI) | Application Default Credentials — Cloud Run service account is granted the Vertex AI User role; no JSON key files |
+| Secrets | Google Secret Manager. `LANGSMITH_API_KEY` and `DAYTONA_API_KEY` stored as secrets, mounted into Cloud Run as env vars via `--set-secrets=KEY=secret-name:latest`. Service account granted `roles/secretmanager.secretAccessor`. Local dev uses gitignored `.env.local`. |
 | Charts | Recharts |
 | Map | Leaflet + react-leaflet |
 | Calendar | react-day-picker |
@@ -203,8 +204,8 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | All three apps look samey (agent defaults to lists) | high if prompt is weak | Bootstrap system prompt explicitly nudges toward the most distinctive primitive for the inferred domain; few-shot includes the trio's expected layouts |
 | Widget library too sparse for the trio | medium | The 15 primitives were chosen specifically to span the trio. Any cuts come from primitives outside the trio. |
 | Vite + Tailwind + Leaflet integration friction | low | All three are well-trodden; Leaflet's only known gotcha is its CSS, which is an `import` line |
-| API keys not in env | low | Set `LANGSMITH_API_KEY` and `DAYTONA_API_KEY` as Cloud Run env vars (NOT prefixed `VITE_` — they are server-only). Vertex AI uses ADC, no key needed. Verify `.gitignore` covers any local `.env` before any commit (per global rule on secrets) |
-| Service account JSON committed by accident | medium | We deliberately do NOT use service-account JSON files — Cloud Run's runtime ADC means no key files exist locally. If a teammate downloads one for local dev, ensure `*.json` patterns in `.gitignore` and a literal-string secret scan before push |
+| API keys not in env | low | Production: secrets live in Google Secret Manager, mounted as Cloud Run env vars at runtime. Vertex AI uses ADC, no key needed. Local dev: `.env.local` (gitignored) — never push. Server-only vars are NOT prefixed `VITE_` so they cannot leak into the browser bundle. |
+| Secret committed by accident | medium | Run a literal-string secret scan (per global rule) on every staged file before push. We deliberately avoid service-account JSON — Cloud Run runtime ADC means no key files exist locally |
 | Cloud Run cold start during demo | medium | Set `--min-instances=1` for the recording session. Costs cents from the GCP free trial. Revert to scale-to-zero after demo |
 | `gcloud` CLI setup time | low | First-time setup is ~5 min: `gcloud auth login`, set project, enable Cloud Run + Vertex AI APIs. Do this at hour 0 before writing any code |
 | Gemini structured-output schema drift | medium | Gemini's JSON-schema mode is good but occasionally emits fields not in the schema. Mitigation: schema validation already in renderer + retry once with the validation error in the next prompt |
