@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-server
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+google-credentials*.json
+service-account*.json
+/tmp
+/.vscode
+.DS_Store
