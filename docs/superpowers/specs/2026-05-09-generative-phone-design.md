@@ -54,7 +54,11 @@ We are committing to a layered execution plan. Ship the safe version first, then
 
 ## Architecture
 
-Four pieces (B1) plus one optional fifth (B3).
+Four pieces (B1) plus one optional fifth (B3). All deployed as a single Cloud Run container.
+
+**Deployment shape:** one Node/Express server serves both the static Vite build (the React app) at `/` and the API routes (`/api/bootstrap`, `/api/mutate`) under `/api/*`. Cloud Run handles HTTPS, scaling, and routing. Server has access to all secret env vars; browser only ever sees `/api/*` JSON responses.
+
+**Why Cloud Run:** single deploy command (`gcloud run deploy --source .`), automatic HTTPS, Vertex AI auth via Application Default Credentials (no service-account JSON to manage), full Google sponsor stack. Cold start risk mitigated by `--min-instances=1` during demo.
 
 ### 1. Shell
 
@@ -166,8 +170,11 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | Build tool | Vite |
 | Framework | React 18 + TypeScript |
 | Styling | Tailwind |
-| LLM | `@google/generative-ai` SDK, Gemini Pro default (Flash fallback for speed) |
+| Server | Node + Express in the same container, serving `dist/` static + `/api/*` |
+| LLM | `@google-cloud/vertexai` SDK against Vertex AI, Gemini Pro default (Flash fallback for speed) |
 | Observability | `langsmith` SDK — `traceable` wrapper around every LLM call |
+| Hosting | Google Cloud Run, `gcloud run deploy --source .`, `--min-instances=1` during demo to avoid cold start |
+| Auth (Vertex AI) | Application Default Credentials — Cloud Run service account is granted the Vertex AI User role; no JSON key files |
 | Charts | Recharts |
 | Map | Leaflet + react-leaflet |
 | Calendar | react-day-picker |
@@ -196,7 +203,10 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 | All three apps look samey (agent defaults to lists) | high if prompt is weak | Bootstrap system prompt explicitly nudges toward the most distinctive primitive for the inferred domain; few-shot includes the trio's expected layouts |
 | Widget library too sparse for the trio | medium | The 15 primitives were chosen specifically to span the trio. Any cuts come from primitives outside the trio. |
 | Vite + Tailwind + Leaflet integration friction | low | All three are well-trodden; Leaflet's only known gotcha is its CSS, which is an `import` line |
-| API keys not in env | low | Add `.env.local` with `VITE_GEMINI_API_KEY` and `VITE_LANGSMITH_API_KEY` — and verify `.gitignore` covers it before any commit (per global rule on secrets) |
+| API keys not in env | low | Set `LANGSMITH_API_KEY` and `DAYTONA_API_KEY` as Cloud Run env vars (NOT prefixed `VITE_` — they are server-only). Vertex AI uses ADC, no key needed. Verify `.gitignore` covers any local `.env` before any commit (per global rule on secrets) |
+| Service account JSON committed by accident | medium | We deliberately do NOT use service-account JSON files — Cloud Run's runtime ADC means no key files exist locally. If a teammate downloads one for local dev, ensure `*.json` patterns in `.gitignore` and a literal-string secret scan before push |
+| Cloud Run cold start during demo | medium | Set `--min-instances=1` for the recording session. Costs cents from the GCP free trial. Revert to scale-to-zero after demo |
+| `gcloud` CLI setup time | low | First-time setup is ~5 min: `gcloud auth login`, set project, enable Cloud Run + Vertex AI APIs. Do this at hour 0 before writing any code |
 | Gemini structured-output schema drift | medium | Gemini's JSON-schema mode is good but occasionally emits fields not in the schema. Mitigation: schema validation already in renderer + retry once with the validation error in the next prompt |
 | (B3) Daytona sandbox cold start during demo recording | high | Default sandbox auto-stops after 15 min idle. Mitigation: pre-warm the marathon-app sandbox immediately before recording the demo; record demo in a single take |
 | (B3) Generated Python code is broken | medium | Tight system prompt with a starter template; sandbox returns 500 on import error → frontend falls back to seed data and the app still works |
@@ -207,7 +217,7 @@ Apps are persisted as a single `apps` array in `localStorage`. No migrations. If
 
 - **Functional:** Three apps generate from three first-messages, persist across reload, and look visibly different. Each has interactive widgets that don't crash on tap.
 - **Demo:** A 90-second video matching the demo arc above can be recorded in one take.
-- **Submission:** Public GitHub repo, demo video link, working app deployed (Vercel preferred for speed; Firebase Hosting if we want to lean Google for the sponsor angle), submission form completed by 5:45 PM local. Submission "protocols used" field: A2UI + LangSmith (+ Daytona if B3 ships).
+- **Submission:** Public GitHub repo, demo video link, app deployed to Google Cloud Run (single container), submission form completed by 5:45 PM local. Submission "protocols used" field: A2UI + LangSmith + Vertex AI (+ Daytona if B3 ships).
 - **Theme:** A judge can answer "would this have been impossible with a chat interface?" with an obvious yes after watching the video for 10 seconds.
 
 ## Open questions
@@ -216,6 +226,7 @@ None blocking. Items deferred to implementation:
 
 - Exact A2UI tree shape — finalize after inspecting the starter kit at build start. If A2UI's published shape works, use it as-is and list "A2UI" on the submission form. If it's unworkable in 6h, build a minimal in-house tree shape and list "custom JSON tree" honestly — do NOT claim A2UI on the submission unless we are actually conforming to it.
 - Exact Gemini model ID — verify against current Vertex AI / Google AI Studio offerings when API keys are in hand. Default to current Gemini Pro; switch to Flash if Pro latency exceeds ~10s end-to-end.
-- Daytona sandbox networking model — verify whether preview URLs are public-by-default or require auth headers, and confirm CORS posture before wiring up the Vercel-deployed frontend.
+- Daytona sandbox networking model — verify whether preview URLs are public-by-default or require auth headers, and confirm CORS posture before wiring up the Cloud Run frontend.
+- GCP project ID + region — confirm at hour 0 when setting up `gcloud`. Default to `us-central1` unless there's a regional reason to prefer otherwise.
 - Icon strategy — emoji is the default, but if there's time, an LLM-picked Lucide icon set would look more polished.
 - Streaming UX — partial render of the tree while tokens arrive vs. wait-and-show. Decide at hour 3.
