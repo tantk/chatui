@@ -5,11 +5,13 @@ dotenv.config({ path: ".env" });
 import express from "express";
 import path from "node:path";
 import { bootstrapRouter } from "./routes/bootstrap";
+import { mutateRouter } from "./routes/mutate";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
 app.use("/api/bootstrap", bootstrapRouter);
+app.use("/api/mutate", mutateRouter);
 
 const distDir = path.resolve("dist");
 app.use(express.static(distDir));

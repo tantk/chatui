@@ -1,4 +1,4 @@
-import type { App } from "./types";
+import type { App, ChatMessage, ToolDeclaration } from "./types";
 
 export async function bootstrap(message: string): Promise<App> {
   const r = await fetch("/api/bootstrap", {
@@ -14,4 +14,19 @@ export async function bootstrap(message: string): Promise<App> {
     backendUrl: null,
     backendStatus: "none" as const,
   };
+}
+
+export async function mutate(args: {
+  message: string;
+  tools: ToolDeclaration[];
+  data: Record<string, unknown>;
+  chatHistory: ChatMessage[];
+}): Promise<{ data: Record<string, unknown>; reply: string; history: ChatMessage[] }> {
+  const r = await fetch("/api/mutate", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (!r.ok) throw new Error(`mutate ${r.status}: ${await r.text()}`);
+  return r.json();
 }

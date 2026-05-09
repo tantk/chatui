@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Renderer } from "../renderer/Renderer";
 import { ChatComposer } from "../chat/ChatComposer";
+import { mutate } from "../lib/api";
 import type { App } from "../lib/types";
 
 type Props = {
@@ -10,7 +11,7 @@ type Props = {
   onHome: () => void;
 };
 
-export function AppView({ appId, apps, onHome }: Props) {
+export function AppView({ appId, apps, setApps, onHome }: Props) {
   const app = apps.find((a) => a.id === appId);
   const [pending, setPending] = useState(false);
 
@@ -18,10 +19,26 @@ export function AppView({ appId, apps, onHome }: Props) {
     return <div className="p-6 text-sm text-red-400">App not found</div>;
   }
 
-  async function handleMutate(_msg: string) {
-    // wired in Phase 3
+  async function handleMutate(msg: string) {
+    if (!app) return;
     setPending(true);
-    setTimeout(() => setPending(false), 500);
+    try {
+      const result = await mutate({
+        message: msg,
+        tools: app.tools,
+        data: app.data,
+        chatHistory: app.chatHistory,
+      });
+      setApps((prev) =>
+        prev.map((a) =>
+          a.id === app.id ? { ...a, data: result.data, chatHistory: result.history } : a
+        )
+      );
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
