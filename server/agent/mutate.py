@@ -22,6 +22,7 @@ from google.genai import types as genai_types
 from .prompts import MUTATE_SYSTEM
 from .schema import ToolDeclaration
 from .tools.handlers import REGISTRY, dispatch
+from server.obs.tracing import trace
 
 _MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
@@ -77,6 +78,7 @@ def _make_adk_tool(decl: ToolDeclaration, state_holder: dict[str, Any]) -> Funct
     return FunctionTool(func=fn)
 
 
+@trace("mutate")
 async def run_mutate(
     *,
     message: str,

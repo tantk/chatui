@@ -10,6 +10,7 @@ import os
 
 from .prompts import BOOTSTRAP_SYSTEM
 from .schema import BootstrapResponse
+from server.obs.tracing import trace
 
 # Set AI-Studio mode for ADK BEFORE importing anything from ADK.
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "false")
@@ -31,6 +32,7 @@ except ImportError:
 _MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
 
+@trace("bootstrap")
 async def run_bootstrap(user_message: str) -> BootstrapResponse:
     if _USE_ADK:
         return await _run_with_adk(user_message)
