@@ -7,14 +7,27 @@ from typing import Any, Callable
 import uuid
 
 
+def _pick(args: dict[str, Any], *keys: str, default: Any = None) -> Any:
+    """Return the first present non-None arg from keys, else default."""
+    for k in keys:
+        if k in args and args[k] is not None:
+            return args[k]
+    return default
+
+
 def _marathon_add_run(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     runs = data.setdefault("runs", [])
+    date = _pick(args, "date")
+    miles = _pick(args, "miles", "distance", "distanceMiles")
+    pace = _pick(args, "pace", "duration", "time")
+    if date is None or miles is None:
+        return {"ok": False, "error": "missing date or miles/distance"}
     entry = {
-        "date": args["date"],
-        "miles": args["miles"],
-        "pace": args["pace"],
-        "x": args["date"],
-        "y": args["miles"],
+        "date": date,
+        "miles": miles,
+        "pace": pace,
+        "x": date,
+        "y": miles,
     }
     runs.append(entry)
     return {"ok": True, "runsCount": len(runs)}
@@ -23,7 +36,8 @@ def _marathon_add_run(args: dict[str, Any], data: dict[str, Any]) -> dict[str, A
 def _marathon_remove_run(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     runs = data.get("runs", [])
     before = len(runs)
-    data["runs"] = [r for r in runs if r.get("date") != args["date"]]
+    target = _pick(args, "date")
+    data["runs"] = [r for r in runs if r.get("date") != target]
     return {"ok": True, "removed": before - len(data["runs"])}
 
 
@@ -33,37 +47,56 @@ def _marathon_set_goal_race(args: dict[str, Any], data: dict[str, Any]) -> dict[
 
 
 def _marathon_plan_week(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
-    data["plannedWeekMiles"] = args["miles"]
+    miles = _pick(args, "miles", "targetDistance", "distance", "weeklyMiles")
+    if miles is None:
+        return {"ok": False, "error": "missing miles"}
+    data["plannedWeekMiles"] = miles
     return {"ok": True}
 
 
 def _trip_add_day(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     days = data.setdefault("days", [])
+    date = _pick(args, "date", "dayDate")
+    title = _pick(args, "title", "name")
+    if date is None or title is None:
+        return {"ok": False, "error": "missing date or title"}
     days.append({
-        "date": args["date"],
-        "title": args["title"],
+        "date": date,
+        "title": title,
         "items": args.get("items") or [],
     })
     return {"ok": True}
 
 
 def _trip_add_activity(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    target = _pick(args, "dayDate", "date")
+    activity = _pick(args, "activity", "item", "name")
+    if target is None or activity is None:
+        return {"ok": False, "error": "missing dayDate or activity"}
     for d in data.get("days", []):
-        if d.get("date") == args["dayDate"]:
-            d.setdefault("items", []).append(args["activity"])
+        if d.get("date") == target:
+            d.setdefault("items", []).append(activity)
             return {"ok": True}
     return {"ok": False, "error": "day not found"}
 
 
 def _trip_set_budget(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
-    data["budget"] = {"amount": args["amount"], "currency": args["currency"]}
+    amount = _pick(args, "amount", "value")
+    currency = _pick(args, "currency", "ccy", default="USD")
+    if amount is None:
+        return {"ok": False, "error": "missing amount"}
+    data["budget"] = {"amount": amount, "currency": currency}
     return {"ok": True}
 
 
 def _trip_move_pin(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     pins = data.setdefault("pins", [])
-    label = args["label"]
-    new_pin = {"label": label, "lat": args["lat"], "lng": args["lng"]}
+    label = _pick(args, "label", "name")
+    lat = _pick(args, "lat", "latitude")
+    lng = _pick(args, "lng", "longitude", "lon")
+    if label is None or lat is None or lng is None:
+        return {"ok": False, "error": "missing label/lat/lng"}
+    new_pin = {"label": label, "lat": lat, "lng": lng}
     for i, p in enumerate(pins):
         if p.get("label") == label:
             pins[i] = new_pin
@@ -74,9 +107,13 @@ def _trip_move_pin(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]
 
 def _jobs_add_application(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     columns = data.setdefault("columns", [])
-    stage = args.get("stage", "Applied")
-    job_id = args.get("id") or uuid.uuid4().hex
-    item = {"id": job_id, "title": args["company"], "subtitle": args["role"]}
+    company = _pick(args, "company", "employer", "name")
+    role = _pick(args, "role", "title", "position", default="")
+    stage = _pick(args, "stage", "status", "column", default="Applied")
+    if company is None:
+        return {"ok": False, "error": "missing company"}
+    job_id = _pick(args, "id") or uuid.uuid4().hex
+    item = {"id": job_id, "title": company, "subtitle": role}
     for col in columns:
         if col.get("name") == stage:
             col.setdefault("items", []).append(item)
@@ -86,11 +123,15 @@ def _jobs_add_application(args: dict[str, Any], data: dict[str, Any]) -> dict[st
 
 
 def _jobs_move_stage(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    job_id = _pick(args, "id", "applicationId", "jobId")
+    to_stage = _pick(args, "toStage", "stage", "column")
+    if job_id is None or to_stage is None:
+        return {"ok": False, "error": "missing id or toStage"}
     moved = None
     for col in data.get("columns", []):
         items = col.get("items", [])
         for i, it in enumerate(items):
-            if it.get("id") == args["id"]:
+            if it.get("id") == job_id:
                 moved = items.pop(i)
                 break
         if moved:
@@ -100,10 +141,10 @@ def _jobs_move_stage(args: dict[str, Any], data: dict[str, Any]) -> dict[str, An
 
     columns = data.setdefault("columns", [])
     for col in columns:
-        if col.get("name") == args["toStage"]:
+        if col.get("name") == to_stage:
             col.setdefault("items", []).append(moved)
             return {"ok": True}
-    columns.append({"name": args["toStage"], "items": [moved]})
+    columns.append({"name": to_stage, "items": [moved]})
     return {"ok": True}
 
 
@@ -115,10 +156,14 @@ def _jobs_add_contact(args: dict[str, Any], data: dict[str, Any]) -> dict[str, A
 
 def _jobs_log_event(args: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     events = data.setdefault("events", [])
+    app_id = _pick(args, "applicationId", "id", "jobId")
+    event_text = _pick(args, "event", "text", "note")
+    if app_id is None or event_text is None:
+        return {"ok": False, "error": "missing applicationId or event"}
     events.append({
-        "applicationId": args["applicationId"],
-        "event": args["event"],
-        "date": args.get("date") or datetime.now(timezone.utc).isoformat(),
+        "applicationId": app_id,
+        "event": event_text,
+        "date": _pick(args, "date") or datetime.now(timezone.utc).isoformat(),
     })
     return {"ok": True}
 

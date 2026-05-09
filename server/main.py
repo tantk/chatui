@@ -15,6 +15,8 @@ load_dotenv(ROOT / ".env.local")
 load_dotenv(ROOT / ".env")
 
 from server.agent.bootstrap import run_bootstrap  # noqa: E402
+from server.agent.mutate import run_mutate  # noqa: E402
+from server.agent.schema import ToolDeclaration  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("genphone")
@@ -48,6 +50,39 @@ async def bootstrap_route(req: BootstrapRequest):
             "createdAt": int(time.time() * 1000),
         }
     )
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+    ts: int
+
+
+class MutateRequest(BaseModel):
+    message: str
+    tools: list[dict]  # validated as ToolDeclaration on the way in
+    data: dict
+    chatHistory: list[ChatMessage] = []
+
+
+@app.post("/api/mutate")
+async def mutate_route(req: MutateRequest):
+    if not req.message.strip():
+        raise HTTPException(400, "message required")
+    if not req.tools:
+        raise HTTPException(400, "tools required")
+    try:
+        decls = [ToolDeclaration.model_validate(t) for t in req.tools]
+        result = await run_mutate(
+            message=req.message,
+            tools=decls,
+            data=req.data,
+            chat_history=[m.model_dump() for m in req.chatHistory],
+        )
+        return result
+    except Exception as e:
+        log.exception("mutate failed")
+        raise HTTPException(500, str(e)) from e
 
 
 # Static frontend (when dist/ exists from `vite build`)
