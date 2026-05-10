@@ -23,6 +23,7 @@ from .prompts import MUTATE_SYSTEM
 from .schema import ToolDeclaration
 from .tools.handlers import REGISTRY, dispatch
 from server.obs.tracing import trace
+from server.obs.budget import check as _budget_check, record as _budget_record
 
 _MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 
@@ -87,6 +88,9 @@ async def run_mutate(
     chat_history: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Returns {"data": <new>, "reply": <text>, "history": <new>}."""
+    # Budget guard before making the call.
+    _budget_check()
+
     # Working copy so failures don't corrupt caller's data.
     state_holder: dict[str, Any] = {"data": json.loads(json.dumps(data))}
 
@@ -117,6 +121,8 @@ async def run_mutate(
     )
 
     text_chunks: list[str] = []
+    input_tokens = 0
+    output_tokens = 0
     async for event in runner.run_async(
         user_id=user_id,
         session_id=session.id,
@@ -124,12 +130,29 @@ async def run_mutate(
             role="user", parts=[genai_types.Part(text=message)]
         ),
     ):
+        um = getattr(event, "usage_metadata", None)
+        if um:
+            input_tokens = max(
+                input_tokens, getattr(um, "prompt_token_count", 0) or 0
+            )
+            output_tokens = max(
+                output_tokens, getattr(um, "candidates_token_count", 0) or 0
+            )
         if not event.is_final_response():
             continue
         if event.content and event.content.parts:
             for p in event.content.parts:
                 if getattr(p, "text", None):
                     text_chunks.append(p.text)
+
+    try:
+        _budget_record(
+            model=_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except Exception:
+        pass
 
     reply = "".join(text_chunks).strip() or "(done)"
 

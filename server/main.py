@@ -17,6 +17,7 @@ load_dotenv(ROOT / ".env")
 from server.agent.bootstrap import run_bootstrap  # noqa: E402
 from server.agent.mutate import run_mutate  # noqa: E402
 from server.agent.schema import ToolDeclaration  # noqa: E402
+from server.obs.budget import BudgetExceeded, snapshot as _budget_snapshot  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("genphone")
@@ -39,6 +40,8 @@ async def bootstrap_route(req: BootstrapRequest):
         raise HTTPException(400, "message required")
     try:
         blob = await run_bootstrap(req.message)
+    except BudgetExceeded as e:
+        raise HTTPException(429, str(e)) from e
     except Exception as e:
         log.exception("bootstrap failed")
         raise HTTPException(500, str(e)) from e
@@ -98,9 +101,16 @@ async def mutate_route(req: MutateRequest):
             chat_history=[m.model_dump() for m in req.chatHistory],
         )
         return result
+    except BudgetExceeded as e:
+        raise HTTPException(429, str(e)) from e
     except Exception as e:
         log.exception("mutate failed")
         raise HTTPException(500, str(e)) from e
+
+
+@app.get("/api/budget")
+async def budget_status():
+    return _budget_snapshot()
 
 
 # Static frontend (when dist/ exists from `vite build`)

@@ -11,6 +11,7 @@ import os
 from .prompts import B3_MARATHON_BACKEND, BOOTSTRAP_SYSTEM
 from .schema import BootstrapResponse
 from server.obs.tracing import trace
+from server.obs.budget import check as _budget_check, record as _budget_record
 
 # Set AI-Studio mode for ADK BEFORE importing anything from ADK.
 os.environ.setdefault("GOOGLE_GENAI_USE_VERTEXAI", "false")
@@ -51,6 +52,12 @@ async def _generate_marathon_backend() -> str | None:
     if os.environ.get("B3_ENABLED", "0") != "1":
         return None
     try:
+        # Budget guard before this call.
+        _budget_check()
+
+        input_tokens = 0
+        output_tokens = 0
+
         if _USE_ADK:
             agent = Agent(
                 name="b3_codegen",
@@ -70,6 +77,14 @@ async def _generate_marathon_backend() -> str | None:
                     role="user", parts=[genai_types.Part(text="generate")]
                 ),
             ):
+                um = getattr(event, "usage_metadata", None)
+                if um:
+                    input_tokens = max(
+                        input_tokens, getattr(um, "prompt_token_count", 0) or 0
+                    )
+                    output_tokens = max(
+                        output_tokens, getattr(um, "candidates_token_count", 0) or 0
+                    )
                 if not event.is_final_response():
                     continue
                 if event.content and event.content.parts:
@@ -85,7 +100,20 @@ async def _generate_marathon_backend() -> str | None:
                 contents="generate",
                 config={"system_instruction": B3_MARATHON_BACKEND},
             )
+            um = getattr(response, "usage_metadata", None)
+            if um:
+                input_tokens = getattr(um, "prompt_token_count", 0) or 0
+                output_tokens = getattr(um, "candidates_token_count", 0) or 0
             raw = (response.text or "").strip()
+
+        try:
+            _budget_record(
+                model=_MODEL,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+        except Exception:
+            pass
 
         raw = _strip_fences(raw)
         # Sanity check: should mention FastAPI
@@ -108,6 +136,9 @@ def _strip_fences(raw: str) -> str:
 
 async def _run_with_adk(user_message: str) -> BootstrapResponse:
     """Use ADK's LlmAgent for the one-shot bootstrap call."""
+    # Budget guard before making the call.
+    _budget_check()
+
     agent = Agent(
         name="bootstrap",
         model=_MODEL,
@@ -121,6 +152,8 @@ async def _run_with_adk(user_message: str) -> BootstrapResponse:
     )
 
     text_chunks: list[str] = []
+    input_tokens = 0
+    output_tokens = 0
     async for event in runner.run_async(
         user_id=user_id,
         session_id=session.id,
@@ -128,6 +161,14 @@ async def _run_with_adk(user_message: str) -> BootstrapResponse:
             role="user", parts=[genai_types.Part(text=user_message)]
         ),
     ):
+        um = getattr(event, "usage_metadata", None)
+        if um:
+            input_tokens = max(
+                input_tokens, getattr(um, "prompt_token_count", 0) or 0
+            )
+            output_tokens = max(
+                output_tokens, getattr(um, "candidates_token_count", 0) or 0
+            )
         if not event.is_final_response():
             continue
         if event.content and event.content.parts:
@@ -135,6 +176,15 @@ async def _run_with_adk(user_message: str) -> BootstrapResponse:
                 t = getattr(p, "text", None)
                 if t:
                     text_chunks.append(t)
+
+    try:
+        _budget_record(
+            model=_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except Exception:
+        pass
 
     raw = _strip_fences("".join(text_chunks))
     return BootstrapResponse.model_validate_json(raw)
@@ -145,6 +195,9 @@ async def _run_with_adk(user_message: str) -> BootstrapResponse:
 async def _run_with_genai(user_message: str) -> BootstrapResponse:
     from google import genai  # type: ignore
 
+    # Budget guard before making the call.
+    _budget_check()
+
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     response = await client.aio.models.generate_content(
         model=_MODEL,
@@ -154,5 +207,18 @@ async def _run_with_genai(user_message: str) -> BootstrapResponse:
             "response_mime_type": "application/json",
         },
     )
+
+    um = getattr(response, "usage_metadata", None)
+    input_tokens = getattr(um, "prompt_token_count", 0) or 0 if um else 0
+    output_tokens = getattr(um, "candidates_token_count", 0) or 0 if um else 0
+    try:
+        _budget_record(
+            model=_MODEL,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    except Exception:
+        pass
+
     text = response.text or ""
     return BootstrapResponse.model_validate_json(_strip_fences(text))
