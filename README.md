@@ -1,4 +1,4 @@
-# Generative Phone
+# ChatUI
 
 > **A chat client where every conversation materializes as a custom-installed app. The agent designs the UI, the data, AND the tool implementations — at runtime, for any domain.**
 
