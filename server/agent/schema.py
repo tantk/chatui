@@ -18,11 +18,26 @@ class ToolParameters(BaseModel):
     required: list[str] | None = None
 
 
+class ToolImplementation(BaseModel):
+    """A JSON-Patch template that the server applies when the tool is called.
+
+    Each patch object can reference call arguments via ``"{{argname}}"``
+    placeholder strings, which the server substitutes at call time. Example:
+
+        [{"op": "add", "path": "/runs/-", "value": {
+            "date": "{{date}}", "miles": "{{miles}}", "pace": "{{pace}}",
+            "x": "{{date}}", "y": "{{miles}}"
+        }}]
+    """
+    type: Literal["patch"] = "patch"
+    patches: list[dict[str, Any]]
+
+
 class ToolDeclaration(BaseModel):
     name: str
     description: str
     parameters: ToolParameters
-    handler: str
+    implementation: ToolImplementation
 
 
 class BootstrapResponse(BaseModel):

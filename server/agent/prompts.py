@@ -37,9 +37,28 @@ Hard requirements:
   "tools": [
     {{
       "name": "addRun",
-      "description": "...",
-      "parameters": {{ "type": "object", "properties": {{...}}, "required": [...] }},
-      "handler": "marathon.addRun"
+      "description": "Append a run to the user's training log.",
+      "parameters": {{
+        "type": "object",
+        "properties": {{
+          "date": {{"type": "string"}},
+          "miles": {{"type": "number"}},
+          "pace": {{"type": "string"}}
+        }},
+        "required": ["date", "miles"]
+      }},
+      "implementation": {{
+        "type": "patch",
+        "patches": [
+          {{"op": "add", "path": "/runs/-", "value": {{
+            "date": "<<date>>",
+            "miles": "<<miles>>",
+            "pace": "<<pace>>",
+            "x": "<<date>>",
+            "y": "<<miles>>"
+          }}}}
+        ]
+      }}
     }}
   ],
   "backendCode": null
@@ -49,7 +68,10 @@ Hard requirements:
 
 3. Bindings paths must reference real keys in your generated data. If a chart binds to "$.runs" then data.runs MUST be a non-empty array of {{x,y}} entries.
 
-4. Tool handler names MUST be one of: marathon.addRun, marathon.removeRun, marathon.setGoalRace, marathon.planWeek, trip.addDay, trip.addActivity, trip.setBudget, trip.movePin, jobs.addApplication, jobs.moveStage, jobs.addContact, jobs.logEvent. Pick tools that match the appType you chose.
+4. Design 3-6 domain-specific tools that fit the app you chose. Name them freely (camelCase verbs like `addRun`, `logHiveInspection`, `recordHoneyYield`, `movePinToCity`). For each tool:
+   - `description` is one short sentence the agent will read at call time.
+   - `parameters` is a JSON Schema `{{type: "object", properties, required}}`.
+   - `implementation` is `{{"type": "patch", "patches": [...]}}` — a list of JSON-Patch operations the server will apply. Each patch object uses JSON-Pointer paths (e.g. "/runs/-" appends to a list, "/totalMiles" replaces a scalar). Patch values may reference call arguments via `"<<argname>>"` placeholders (literal angle brackets, no quotes around the brackets), which the server substitutes verbatim before applying. Supported `op` values: `add`, `replace`, `remove`. Each tool's patches MUST manipulate keys that exist in the seed `data` you generated, so calling the tool produces a coherent state.
 
 5. backendCode is null for this turn.
 
@@ -75,11 +97,11 @@ MUTATE_SYSTEM = f"""You are the agent powering an installed micro-app on the use
 
 You have three kinds of tools:
 
-1. **Domain tools** (declared per-app): change the app's data — log a run, add a day to a trip, move a job between stages, etc. Prefer these for any data-shaped request.
+1. **Domain tools** (declared per-app at bootstrap, whatever this app declared — could be `addRun`, `logHiveInspection`, anything): each one mutates a specific slice of the app's primary data via a server-side JSON-Patch template. Prefer these for any data-shaped request.
 
 2. **`editLayout(newTreeJson)`**: replace the app's UI tree with a new one. Use this when the user asks for structural UI changes — adding a widget, removing a widget, swapping a widget type, reorganizing the layout. Pass the COMPLETE new tree as a JSON string, not a diff.
 
-3. **`applyDataPatch(patchesJson)`**: surgically update any data field via JSON Patch. Use this whenever a domain tool changes raw data and a derived stat needs to stay in sync. For example: after `addRun(miles=5)` increases the run count, recompute and patch the `totalMiles` field if it exists. Send a JSON-stringified array of patches like `[{{"op":"replace","path":"/totalMiles","value":42}}]`.
+3. **`apply_data_patch(patchesJson)`**: surgically update any data field via JSON Patch. Use this whenever a domain tool changes raw data and a derived/aggregate stat needs to stay in sync (totals, counts, computed series). For example: after the domain tool appends a run, look at the data shape and patch `totalMiles` or any derived series so aggregates don't go stale. Send a JSON-stringified array of patches like `[{{"op":"replace","path":"/totalMiles","value":42}}]`.
 
 Rules:
 1. Prefer calling a tool over re-explaining what would happen.

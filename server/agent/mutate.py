@@ -2,8 +2,10 @@
 return updated state + assistant reply."""
 
 from __future__ import annotations
+import copy
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -21,7 +23,6 @@ from google.genai import types as genai_types
 
 from .prompts import MUTATE_SYSTEM
 from .schema import ToolDeclaration, WidgetNode
-from .tools.handlers import REGISTRY, dispatch
 from server.obs.tracing import trace
 from server.obs.budget import check as _budget_check, record as _budget_record
 
@@ -37,31 +38,132 @@ _TYPE_MAP: dict[str, type] = {
 }
 
 
+# --- JSON-Patch template interpreter -----------------------------------
+# Patch templates can embed `{{argname}}` placeholders inside string values,
+# which we substitute with the call's arguments before applying the patch.
+
+# We intentionally use ``<<name>>`` rather than ``{{name}}`` because ADK's
+# instruction template engine eagerly interprets any ``{...}`` block in the
+# system prompt as a session-state variable reference and raises if the var
+# is missing. ``<<name>>`` survives ADK's substitution pass so the agent can
+# emit it verbatim into tool implementations.
+_PLACEHOLDER_RE = re.compile(r"^<<(\w+)>>$")
+_INLINE_RE = re.compile(r"<<(\w+)>>")
+
+
+def _substitute(value: Any, args: dict[str, Any]) -> Any:
+    """Recursively substitute ``{{argname}}`` placeholders in any JSON value.
+
+    A whole-string placeholder (``"{{x}}"``) is replaced with the raw arg value
+    (preserving its type — number, bool, list, etc.). An inline placeholder
+    (``"Run on {{date}}"``) is stringified into the surrounding text.
+    """
+    if isinstance(value, str):
+        m = _PLACEHOLDER_RE.match(value)
+        if m:
+            return args.get(m.group(1))
+
+        def _repl(match: "re.Match[str]") -> str:
+            v = args.get(match.group(1), "")
+            return "" if v is None else str(v)
+
+        return _INLINE_RE.sub(_repl, value)
+    if isinstance(value, dict):
+        return {k: _substitute(v, args) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_substitute(v, args) for v in value]
+    return value
+
+
+def apply_template(
+    impl: dict[str, Any],
+    args: dict[str, Any],
+    data: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply a JSON-Patch-template tool implementation to ``data`` in place.
+
+    Returns ``{"ok": True, "applied": N}`` on success, or
+    ``{"ok": False, "error": "..."}`` on any failure.
+    """
+    if not isinstance(impl, dict) or impl.get("type") != "patch":
+        return {"ok": False, "error": f"unsupported impl type: {impl.get('type') if isinstance(impl, dict) else type(impl).__name__}"}
+    patches = impl.get("patches") or []
+    if not isinstance(patches, list):
+        return {"ok": False, "error": "patches must be a list"}
+
+    applied = 0
+    for raw in patches:
+        try:
+            p = _substitute(copy.deepcopy(raw), args)
+            op = p.get("op")
+            path = p.get("path", "")
+            value = p.get("value")
+            segs = [s for s in path.split("/") if s != ""]
+            parent: Any = data
+            for s in segs[:-1]:
+                if isinstance(parent, list):
+                    parent = parent[int(s)]
+                else:
+                    parent = parent.get(s) if hasattr(parent, "get") else parent[s]
+            last = segs[-1] if segs else None
+
+            if op in ("replace", "add"):
+                if last is None:
+                    if isinstance(value, dict):
+                        data.clear()
+                        data.update(value)
+                    else:
+                        return {"ok": False, "error": "root replace requires object"}
+                elif isinstance(parent, list):
+                    idx = int(last) if last != "-" else len(parent)
+                    if op == "replace":
+                        parent[idx] = value
+                    else:
+                        parent.insert(idx, value)
+                else:
+                    parent[last] = value
+            elif op == "remove":
+                if last is None:
+                    return {"ok": False, "error": "remove requires path"}
+                if isinstance(parent, list):
+                    del parent[int(last)]
+                else:
+                    parent.pop(last, None)
+            else:
+                return {"ok": False, "error": f"unsupported op: {op}"}
+            applied += 1
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"patch failed: {e}", "applied": applied}
+
+    return {"ok": True, "applied": applied}
+
+
 def _make_adk_tool(decl: ToolDeclaration, state_holder: dict[str, Any]) -> FunctionTool:
-    """Build an ADK FunctionTool whose execution dispatches into our pure
-    handler and mutates the shared state_holder['data'] dict.
+    """Build an ADK FunctionTool that applies a declarative JSON-Patch template.
+
+    The agent declared this tool at bootstrap time, complete with parameter
+    schema and a patch-template implementation. Calling the tool substitutes
+    the call's args into the template and applies the resulting patches to
+    ``state_holder['data']``.
 
     Because ADK introspects the function via ``inspect.signature``, a plain
     ``**kwargs`` function would have its parameters dropped. So we generate
     a function with a real positional/keyword signature using ``exec``.
     """
-    handler_name = decl.handler
+    impl = decl.implementation.model_dump()
     properties: dict[str, dict[str, Any]] = decl.parameters.properties or {}
     required_set: set[str] = set(decl.parameters.required or [])
 
-    def impl(kwargs: dict[str, Any]) -> dict[str, Any]:
-        # Strip None defaults that came from optional params being unset.
+    def runner(kwargs: dict[str, Any]) -> dict[str, Any]:
         cleaned = {k: v for k, v in kwargs.items() if v is not None}
         try:
-            return dispatch(handler_name, cleaned, state_holder["data"])
+            return apply_template(impl, cleaned, state_holder["data"])
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e)}
 
     # Build signature parts: required first, then optional with =None.
-    # (Sort so required params come first regardless of `properties` order, since
-    # Python forbids a non-default arg after a default arg.)
     sig_parts: list[str] = []
-    locals_dict: dict[str, Any] = {"_impl": impl}
+    locals_dict: dict[str, Any] = {"_runner": runner}
     ordered = sorted(
         properties.items(), key=lambda kv: 0 if kv[0] in required_set else 1
     )
@@ -77,7 +179,7 @@ def _make_adk_tool(decl: ToolDeclaration, state_holder: dict[str, Any]) -> Funct
     src = (
         f"def {decl.name}({', '.join(sig_parts)}) -> dict:\n"
         f'    """{safe_doc}"""\n'
-        f"    return _impl(locals())\n"
+        f"    return _runner(locals())\n"
     )
     exec(src, locals_dict)  # noqa: S102
     fn = locals_dict[decl.name]
@@ -197,11 +299,6 @@ async def run_mutate(
         "data": json.loads(json.dumps(data)),
         "tree": json.loads(json.dumps(tree)),
     }
-
-    # Validate every declared handler exists in registry.
-    for t in tools:
-        if t.handler not in REGISTRY:
-            raise ValueError(f"declared tool has unknown handler: {t.handler}")
 
     adk_tools = [_make_adk_tool(t, state_holder) for t in tools]
     adk_tools.append(_make_edit_layout_tool(state_holder))
