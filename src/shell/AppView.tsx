@@ -18,9 +18,9 @@ const CHAT_PANEL_MAX_RATIO = 0.75;  // up to 75% of the phone body
 export function AppView({ appId, apps, setApps, onHome }: Props) {
   const app = apps.find((a) => a.id === appId);
   const [pending, setPending] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [chatHeightPx, setChatHeightPx] = useState(CHAT_PANEL_DEFAULT_PX);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{ startY: number; startH: number } | null>(null);
 
   const beginDrag = useCallback((clientY: number) => {
@@ -85,6 +85,13 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
     };
   }, [app?.id, app?.backendStatus, setApps]);
 
+  // Auto-scroll the messages list to the bottom on new message or while pending
+  useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [app?.chatHistory.length, pending]);
+
   if (!app) {
     return <div className="p-6 text-sm text-red-400">App not found</div>;
   }
@@ -114,54 +121,7 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
     }
   }
 
-  // Last 4 chat messages (2 turns) shown above the composer in app view
-  const recentChat = app.chatHistory.slice(-4);
-  const historyCount = app.chatHistory.length;
-
-  // History view replaces the app view entirely
-  if (historyOpen) {
-    return (
-      <div className="flex-1 min-h-0 flex flex-col">
-        <div className="shrink-0 flex items-center gap-3 p-3 border-b border-neutral-800">
-          <button onClick={() => setHistoryOpen(false)} className="text-neutral-400 text-sm">
-            ‹ Back
-          </button>
-          <span className="text-2xl">{app.icon}</span>
-          <div className="flex-1">
-            <div className="text-sm">{app.name}</div>
-            <div className="text-[10px] text-neutral-500">{historyCount} messages</div>
-          </div>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-2">
-          {app.chatHistory.length === 0 && (
-            <div className="text-xs text-neutral-500 text-center mt-8">
-              No messages yet. Type below to start.
-            </div>
-          )}
-          {app.chatHistory.map((m, i) => (
-            <div
-              key={i}
-              className={
-                m.role === "user"
-                  ? "text-xs text-neutral-200 bg-neutral-800 rounded-2xl rounded-br-sm px-3 py-1.5 ml-auto max-w-[85%] w-fit"
-                  : "text-xs text-emerald-100 bg-emerald-900/40 rounded-2xl rounded-bl-sm px-3 py-1.5 max-w-[85%] w-fit"
-              }
-            >
-              {m.content}
-            </div>
-          ))}
-          {pending && (
-            <div className="text-xs text-neutral-500 px-3 py-1.5">thinking…</div>
-          )}
-        </div>
-        <div className="shrink-0">
-          <ChatComposer onSubmit={handleMutate} disabled={pending} />
-        </div>
-      </div>
-    );
-  }
-
-  const showChatPanel = recentChat.length > 0 || pending;
+  const showChatPanel = app.chatHistory.length > 0 || pending;
 
   return (
     <div ref={containerRef} className="flex-1 min-h-0 flex flex-col">
@@ -169,18 +129,6 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
         <button onClick={onHome} className="text-neutral-400 text-sm">‹ Home</button>
         <span className="text-2xl">{app.icon}</span>
         <span className="text-sm flex-1">{app.name}</span>
-        <button
-          onClick={() => setHistoryOpen(true)}
-          className="text-neutral-400 text-lg leading-none px-1.5 py-0.5 rounded hover:bg-neutral-800 relative"
-          aria-label="Chat history"
-        >
-          ☰
-          {historyCount > 0 && (
-            <span className="absolute -top-1 -right-1 bg-emerald-500 text-[9px] text-black rounded-full min-w-4 h-4 flex items-center justify-center px-1">
-              {historyCount > 99 ? "99+" : historyCount}
-            </span>
-          )}
-        </button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <Renderer tree={app.tree} data={app.data} backendUrl={app.backendUrl} />
@@ -199,8 +147,8 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
           >
             <div className="w-10 h-1 rounded-full bg-neutral-600" />
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
-            {recentChat.map((m, i) => (
+          <div ref={messagesRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
+            {app.chatHistory.map((m, i) => (
               <div
                 key={i}
                 className={
