@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-from .prompts import BOOTSTRAP_SYSTEM
+from .prompts import B3_MARATHON_BACKEND, BOOTSTRAP_SYSTEM
 from .schema import BootstrapResponse
 from server.obs.tracing import trace
 
@@ -35,8 +35,65 @@ _MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview")
 @trace("bootstrap")
 async def run_bootstrap(user_message: str) -> BootstrapResponse:
     if _USE_ADK:
-        return await _run_with_adk(user_message)
-    return await _run_with_genai(user_message)
+        blob = await _run_with_adk(user_message)
+    else:
+        blob = await _run_with_genai(user_message)
+
+    # B3: optionally generate a Python backend for marathon apps.
+    if blob.appType == "marathon":
+        blob.backendCode = await _generate_marathon_backend()
+
+    return blob
+
+
+async def _generate_marathon_backend() -> str | None:
+    """Best-effort. Returns None on any failure — never break B1."""
+    if os.environ.get("B3_ENABLED", "0") != "1":
+        return None
+    try:
+        if _USE_ADK:
+            agent = Agent(
+                name="b3_codegen",
+                model=_MODEL,
+                instruction=B3_MARATHON_BACKEND,
+            )
+            runner = InMemoryRunner(agent=agent, app_name="genphone-b3")
+            user_id = "b3-codegen"
+            session = await runner.session_service.create_session(
+                app_name="genphone-b3", user_id=user_id
+            )
+            chunks: list[str] = []
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session.id,
+                new_message=genai_types.Content(
+                    role="user", parts=[genai_types.Part(text="generate")]
+                ),
+            ):
+                if not event.is_final_response():
+                    continue
+                if event.content and event.content.parts:
+                    for p in event.content.parts:
+                        if getattr(p, "text", None):
+                            chunks.append(p.text)
+            raw = "".join(chunks).strip()
+        else:
+            from google import genai  # type: ignore
+            client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+            response = await client.aio.models.generate_content(
+                model=_MODEL,
+                contents="generate",
+                config={"system_instruction": B3_MARATHON_BACKEND},
+            )
+            raw = (response.text or "").strip()
+
+        raw = _strip_fences(raw)
+        # Sanity check: should mention FastAPI
+        if "FastAPI" not in raw and "fastapi" not in raw:
+            return None
+        return raw
+    except Exception:
+        return None
 
 
 def _strip_fences(raw: str) -> str:

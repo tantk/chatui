@@ -43,13 +43,31 @@ async def bootstrap_route(req: BootstrapRequest):
         log.exception("bootstrap failed")
         raise HTTPException(500, str(e)) from e
 
-    return JSONResponse(
-        {
-            **blob.model_dump(),
-            "id": str(uuid.uuid4()),
-            "createdAt": int(time.time() * 1000),
-        }
-    )
+    app_id = str(uuid.uuid4())
+    payload = {
+        **blob.model_dump(),
+        "id": app_id,
+        "createdAt": int(time.time() * 1000),
+        "backendStatus": "none",
+    }
+
+    if blob.backendCode:
+        try:
+            from server.sandbox.provisioner import start as start_provision
+
+            start_provision(app_id, blob.backendCode)
+            payload["backendStatus"] = "provisioning"
+        except Exception:  # noqa: BLE001
+            log.exception("provisioner kickoff failed; degrading to seed-only")
+
+    return JSONResponse(payload)
+
+
+@app.get("/api/app/{app_id}/backend")
+async def backend_status(app_id: str):
+    from server.sandbox.provisioner import get
+
+    return get(app_id)
 
 
 class ChatMessage(BaseModel):

@@ -7,7 +7,13 @@ export function resolveBinding(
 ): unknown {
   if (typeof expr !== "string") return expr;
   if (expr.startsWith("$BACKEND/")) {
-    return backendUrl ? backendUrl + expr.slice("$BACKEND".length) : null;
+    if (!backendUrl) return null;
+    const path = expr.slice("$BACKEND".length); // e.g. "/metrics"
+    // Insert path before any existing query string so e.g.
+    // "https://host?token=X" + "/metrics" → "https://host/metrics?token=X"
+    const qIdx = backendUrl.indexOf("?");
+    if (qIdx === -1) return backendUrl + path;
+    return backendUrl.slice(0, qIdx) + path + backendUrl.slice(qIdx);
   }
   if (!expr.startsWith("$")) return expr;
   const path = expr.slice(1).replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);

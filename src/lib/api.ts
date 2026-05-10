@@ -16,6 +16,14 @@ export async function bootstrap(message: string): Promise<App> {
   };
 }
 
+export async function pollBackend(
+  appId: string
+): Promise<{ state: string; url?: string; error?: string }> {
+  const r = await fetch(`/api/app/${appId}/backend`);
+  if (!r.ok) throw new Error(`poll ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
 export async function mutate(args: {
   message: string;
   tools: ToolDeclaration[];

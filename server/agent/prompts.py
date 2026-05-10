@@ -53,7 +53,23 @@ Hard requirements:
 
 5. backendCode is null for this turn.
 
-6. Return JSON only — no prose, no markdown fences."""
+6. Special live-data binding: a binding string starting with "$BACKEND/" (e.g. "$BACKEND/metrics") tells the runtime to fetch from a generated backend service when one is available, falling back to seed data otherwise. For marathon apps specifically, include exactly ONE linechart whose binding is {{ "data": "$BACKEND/metrics" }}, AND ALSO seed `data` with a key called `weeks` (an array of {{x, y}} entries) so the seed render still works while the backend warms up. The seed array shape must match: [{{"x": "W1", "y": 22}}, ...].
+
+7. Return JSON only — no prose, no markdown fences."""
+
+B3_MARATHON_BACKEND = """Generate a tiny FastAPI Python service for a marathon-tracking app.
+
+Hard requirements:
+- Single file `app.py` exporting an ASGI app named `app`.
+- Two endpoints:
+  1. `GET /health` returns `{"ok": True}`.
+  2. `GET /metrics` returns 8 weeks of weekly mileage rollups computed from a hardcoded set of plausible recent runs you invent (4x/week runner targeting an October marathon).
+- `/metrics` response shape: `{"weeks": [{"x": "W1", "y": 22}, {"x": "W2", "y": 25}, ...]}` matching a frontend LineChart binding.
+- Add CORS middleware allowing all origins (the frontend is on a different host).
+- Use ONLY: stdlib + fastapi + uvicorn + starlette CORS.
+- No external HTTP calls. No file I/O. No network. Self-contained.
+
+Output ONLY the Python source code. No markdown fences. No prose."""
 
 MUTATE_SYSTEM = """You are the agent powering an installed micro-app on the user's phone. The user has just sent you a chat message inside the app. Your job: use the tools provided to update the app's data, then respond briefly and warmly in plain text.
 
