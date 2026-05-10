@@ -179,6 +179,31 @@ This was built solo in 6 hours on May 9-10, 2026, for the AI Tinkerers Generativ
 
 Protocols / sponsor stack used: **Gemini (AI Studio)** · **Google ADK** · **LangSmith** · **Daytona** · **Google Cloud Run** · **Secret Manager**
 
+## Next steps
+
+### Decouple the UI metaphor from the wire protocol via AG-UI
+
+The phone-app-store UX is **just one consumer** of the underlying agent system. The substance — bootstrap + mutate + agent-authored JSON-Patch tools + universal `editLayout` / `applyDataPatch` + B3 Daytona sandboxes — is genuinely portable. The right next step is to expose it via the canonical agentic-UI wire protocol, **AG-UI**, so the system can be consumed by any AG-UI-compatible client (CopilotKit, Mastra UI, custom desktop/Slack/CLI frontends), not just our phone shell.
+
+Concretely:
+
+1. **Add an AG-UI emitter to the backend.** ADK already has hooks during the agent run; bridge them to AG-UI events (`TextMessageStart` / `TextMessageContent` / `ToolCallStart` / `ToolCallEnd` / `StateSnapshot` / `StateDelta` / `RunStarted` / `RunFinished`). The `ag-ui-protocol` Python package handles this — it's an adapter, not a rewrite.
+2. **Expose two endpoints simultaneously.** Keep `/api/bootstrap` and `/api/mutate` for the phone shell (no migration risk). Add `/api/agui` (SSE or websocket) emitting AG-UI events. Same backend, same agent loop, same Daytona sandbox — two consumers.
+3. **Frontend stays mostly unchanged.** The renderer, the 16-widget catalog, the phone shell, the install animation — none of those care about the wire format. A small adapter layer translates AG-UI events into the same state updates we currently do via the JSON response.
+
+What this unlocks:
+
+- **Reusability ceiling moves up.** Today the system's ceiling is "the phone-app-store UX." With AG-UI it becomes "any agent UI ecosystem that speaks AG-UI."
+- **Standard tooling for free.** AG-UI clients get streaming progress, tool-call inspection, observability, etc. without us building any of it.
+- **The phone metaphor stays as the flagship UI**, but it's now one of many possible frontends consuming the same agent substance.
+
+### Other candidates (less load-bearing)
+
+- **Generalize B3 beyond marathon.** The Daytona codegen prompt currently hardcodes marathon semantics. Same pattern as the tool-cleanup: drop the conditional and the `B3_MARATHON_BACKEND` prompt; instruct the agent to design useful endpoints for whatever app it just generated. Frontend `$BACKEND/...` binding is already domain-agnostic.
+- **Add a `/api/dispatch` endpoint** for direct (non-LLM) tool calls from Form/Button widgets. Today every Form click round-trips through Gemini just to translate `{date, miles, pace}` into a tool call the schema already specifies — pure waste of latency and tokens. ~30 min fix.
+- **Widen the widget catalog** with declarative custom-layout primitives (Vega-Lite for arbitrary charts; flex/grid composition primitive for novel layouts). Pushes the visual ceiling without adding a JSX-eval security path.
+- **Daytona-as-widget-runtime** (the most ambitious): when the agent encounters a domain that needs a widget the catalog doesn't have, it generates a sandboxed mini-app (HTML/JS/CSS), the server provisions a Daytona container, the frontend embeds via iframe with `postMessage`. Same pattern as B3 backend but for novel UI primitives.
+
 ## License
 
 Apache 2.0.
