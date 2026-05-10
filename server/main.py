@@ -83,6 +83,7 @@ class MutateRequest(BaseModel):
     message: str
     tools: list[dict]  # validated as ToolDeclaration on the way in
     data: dict
+    tree: dict
     chatHistory: list[ChatMessage] = []
 
 
@@ -98,6 +99,7 @@ async def mutate_route(req: MutateRequest):
             message=req.message,
             tools=decls,
             data=req.data,
+            tree=req.tree,
             chat_history=[m.model_dump() for m in req.chatHistory],
         )
         return result

@@ -20,7 +20,7 @@ from google.adk.tools import FunctionTool
 from google.genai import types as genai_types
 
 from .prompts import MUTATE_SYSTEM
-from .schema import ToolDeclaration
+from .schema import ToolDeclaration, WidgetNode
 from .tools.handlers import REGISTRY, dispatch
 from server.obs.tracing import trace
 from server.obs.budget import check as _budget_check, record as _budget_record
@@ -58,9 +58,14 @@ def _make_adk_tool(decl: ToolDeclaration, state_holder: dict[str, Any]) -> Funct
             return {"ok": False, "error": str(e)}
 
     # Build signature parts: required first, then optional with =None.
+    # (Sort so required params come first regardless of `properties` order, since
+    # Python forbids a non-default arg after a default arg.)
     sig_parts: list[str] = []
     locals_dict: dict[str, Any] = {"_impl": impl}
-    for pname, schema in properties.items():
+    ordered = sorted(
+        properties.items(), key=lambda kv: 0 if kv[0] in required_set else 1
+    )
+    for pname, schema in ordered:
         py_type = _TYPE_MAP.get(schema.get("type", "string"), str)
         type_name = py_type.__name__
         if pname in required_set:
@@ -79,20 +84,54 @@ def _make_adk_tool(decl: ToolDeclaration, state_holder: dict[str, Any]) -> Funct
     return FunctionTool(func=fn)
 
 
+def _make_edit_layout_tool(state_holder: dict[str, Any]) -> FunctionTool:
+    """Universal tool: lets the agent replace the app's UI tree.
+
+    Accepts the new tree as a JSON string (safer than dict — Gemini/ADK can be
+    finicky about coercing dict args). Validates strictly against WidgetNode
+    before mutating state.
+    """
+
+    def editLayout(newTreeJson: str) -> dict:
+        """Replace the app's UI tree with a new tree.
+
+        Args:
+            newTreeJson: The COMPLETE new UI tree as a JSON string, matching the
+                WidgetNode schema. Must use only widget types from the catalog.
+                Keep bindings consistent with the existing data keys.
+        """
+        try:
+            parsed = json.loads(newTreeJson)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"invalid JSON: {e}"}
+        try:
+            validated = WidgetNode.model_validate(parsed)
+            state_holder["tree"] = validated.model_dump(exclude_none=True)
+            return {"ok": True, "message": "tree updated"}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"tree validation failed: {e}"}
+
+    return FunctionTool(func=editLayout)
+
+
 @trace("mutate")
 async def run_mutate(
     *,
     message: str,
     tools: list[ToolDeclaration],
     data: dict[str, Any],
+    tree: dict[str, Any],
     chat_history: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Returns {"data": <new>, "reply": <text>, "history": <new>}."""
+    """Returns {"data": <new>, "tree": <new>, "reply": <text>, "history": <new>}."""
     # Budget guard before making the call.
     _budget_check()
 
     # Working copy so failures don't corrupt caller's data.
-    state_holder: dict[str, Any] = {"data": json.loads(json.dumps(data))}
+    state_holder: dict[str, Any] = {
+        "data": json.loads(json.dumps(data)),
+        "tree": json.loads(json.dumps(tree)),
+    }
 
     # Validate every declared handler exists in registry.
     for t in tools:
@@ -100,11 +139,14 @@ async def run_mutate(
             raise ValueError(f"declared tool has unknown handler: {t.handler}")
 
     adk_tools = [_make_adk_tool(t, state_holder) for t in tools]
+    adk_tools.append(_make_edit_layout_tool(state_holder))
 
     instruction = (
         MUTATE_SYSTEM
         + "\n\n# Current app data:\n"
         + json.dumps(state_holder["data"], indent=2)
+        + "\n\n# Current UI tree:\n"
+        + json.dumps(state_holder["tree"], indent=2)
     )
 
     agent = Agent(
@@ -163,6 +205,7 @@ async def run_mutate(
 
     return {
         "data": state_holder["data"],
+        "tree": state_holder["tree"],
         "reply": reply,
         "history": new_history,
     }
