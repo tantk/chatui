@@ -8,17 +8,17 @@ type Props = {
 export function NewChatScreen({ onSubmit, onBack }: Props) {
   const [msg, setMsg] = useState("");
   return (
-    <div className="flex-1 flex flex-col">
-      <div className="flex items-center gap-3 p-3 border-b border-neutral-800">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="shrink-0 flex items-center gap-3 p-3 border-b border-neutral-800">
         <button onClick={onBack} className="text-neutral-400 text-sm">‹ Home</button>
         <span className="text-sm">New Chat</span>
       </div>
-      <div className="flex-1 p-4 flex items-end">
+      <div className="flex-1 min-h-0 p-4 flex items-end overflow-y-auto">
         <div className="text-sm text-neutral-500">
           What do you want help with? I'll build you an app for it.
         </div>
       </div>
-      <div className="p-3 border-t border-neutral-800 flex gap-2">
+      <div className="shrink-0 p-3 border-t border-neutral-800 flex gap-2">
         <input
           autoFocus
           value={msg}

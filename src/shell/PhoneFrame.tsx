@@ -7,7 +7,7 @@ export function PhoneFrame({ children }: { children: ReactNode }) {
         <div className="h-8 bg-black flex items-center justify-center text-xs text-neutral-400">
           9:41
         </div>
-        <div className="flex-1 overflow-hidden flex flex-col">{children}</div>
+        <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>
       </div>
     </div>
   );

@@ -77,16 +77,18 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      <div className="flex items-center gap-3 p-3 border-b border-neutral-800">
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="shrink-0 flex items-center gap-3 p-3 border-b border-neutral-800">
         <button onClick={onHome} className="text-neutral-400 text-sm">‹ Home</button>
         <span className="text-2xl">{app.icon}</span>
         <span className="text-sm">{app.name}</span>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <Renderer tree={app.tree} data={app.data} backendUrl={app.backendUrl} />
       </div>
-      <ChatComposer onSubmit={handleMutate} disabled={pending} />
+      <div className="shrink-0">
+        <ChatComposer onSubmit={handleMutate} disabled={pending} />
+      </div>
     </div>
   );
 }
