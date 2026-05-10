@@ -114,6 +114,71 @@ def _make_edit_layout_tool(state_holder: dict[str, Any]) -> FunctionTool:
     return FunctionTool(func=editLayout)
 
 
+def _make_apply_data_patch_tool(state_holder: dict[str, Any]) -> FunctionTool:
+    """Universal tool: lets the agent surgically update any data field via JSON Patch."""
+
+    def apply_data_patch(patchesJson: str) -> dict:
+        """Apply a JSON Patch to the app's data. Use this to keep derived stats
+        consistent (e.g., after addRun, recompute totalMiles).
+
+        Args:
+            patchesJson: A JSON-stringified array of RFC-6902 patches, e.g.
+                '[{"op":"replace","path":"/totalMiles","value":42}]'.
+                Supported ops: replace, add, remove. Paths use JSON Pointer syntax
+                (/foo/bar/0/baz).
+        """
+        try:
+            patches = json.loads(patchesJson)
+            if not isinstance(patches, list):
+                return {"ok": False, "error": "patchesJson must be a JSON array"}
+
+            data = state_holder["data"]
+            applied = 0
+            for p in patches:
+                op = p.get("op")
+                path = p.get("path", "")
+                value = p.get("value")
+                segs = [s for s in path.split("/") if s != ""]
+                # Walk to parent
+                parent = data
+                for s in segs[:-1]:
+                    if isinstance(parent, list):
+                        parent = parent[int(s)]
+                    else:
+                        parent = parent.get(s) if hasattr(parent, "get") else parent[s]
+                last = segs[-1] if segs else None
+
+                if op == "replace" or op == "add":
+                    if last is None:
+                        # Replace whole data
+                        if isinstance(value, dict):
+                            state_holder["data"] = value
+                        else:
+                            return {"ok": False, "error": "root replace requires object"}
+                    elif isinstance(parent, list):
+                        idx = int(last) if last != "-" else len(parent)
+                        if op == "replace":
+                            parent[idx] = value
+                        else:
+                            parent.insert(idx, value)
+                    else:
+                        parent[last] = value
+                elif op == "remove":
+                    if isinstance(parent, list):
+                        del parent[int(last)]
+                    else:
+                        parent.pop(last, None)
+                else:
+                    return {"ok": False, "error": f"unsupported op: {op}"}
+                applied += 1
+
+            return {"ok": True, "applied": applied}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e)}
+
+    return FunctionTool(func=apply_data_patch)
+
+
 @trace("mutate")
 async def run_mutate(
     *,
@@ -140,6 +205,7 @@ async def run_mutate(
 
     adk_tools = [_make_adk_tool(t, state_holder) for t in tools]
     adk_tools.append(_make_edit_layout_tool(state_holder))
+    adk_tools.append(_make_apply_data_patch_tool(state_holder))
 
     instruction = (
         MUTATE_SYSTEM

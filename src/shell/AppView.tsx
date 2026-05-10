@@ -131,7 +131,17 @@ export function AppView({ appId, apps, setApps, onHome }: Props) {
         <span className="text-sm flex-1">{app.name}</span>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <Renderer tree={app.tree} data={app.data} backendUrl={app.backendUrl} />
+        <Renderer
+          tree={app.tree}
+          data={app.data}
+          backendUrl={app.backendUrl}
+          onAction={(action, args) => {
+            const argLine = Object.keys(args).length
+              ? `Arguments: ${JSON.stringify(args)}`
+              : "(no arguments)";
+            handleMutate(`Use the \`${action}\` tool. ${argLine}`);
+          }}
+        />
       </div>
       {showChatPanel && (
         <div

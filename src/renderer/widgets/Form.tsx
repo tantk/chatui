@@ -3,11 +3,36 @@ import type { WidgetNode } from "../../lib/types";
 
 type Field = { name: string; label: string; type: "text" | "number" | "date" | "select"; options?: string[] };
 
-export function Form({ node }: { node: WidgetNode }) {
+type Props = {
+  node: WidgetNode;
+  onAction?: (action: string, args: Record<string, unknown>) => void;
+};
+
+export function Form({ node, onAction }: Props) {
   const fields = (node.props?.fields as Field[]) ?? [];
   const submitLabel = (node.props?.submitLabel as string) ?? "Submit";
-  const action = node.props?.action as string | undefined;
+  const action = (node.props?.action as string) ?? "";
   const [vals, setVals] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState(false);
+
+  async function handleSubmit() {
+    if (!action || pending) return;
+    setPending(true);
+    try {
+      // Coerce numbers where the field declared type=number
+      const args: Record<string, unknown> = {};
+      for (const f of fields) {
+        const raw = vals[f.name];
+        if (raw === undefined || raw === "") continue;
+        args[f.name] = f.type === "number" ? Number(raw) : raw;
+      }
+      onAction?.(action, args);
+      // Optimistically clear; the chat panel will show the agent reply
+      setVals({});
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
     <div className="rounded-2xl bg-neutral-900 p-4 space-y-3">
@@ -34,10 +59,11 @@ export function Form({ node }: { node: WidgetNode }) {
         </div>
       ))}
       <button
-        onClick={() => alert(`(stub) would call action: ${action ?? "—"} with ${JSON.stringify(vals)}`)}
-        className="w-full rounded-xl bg-emerald-600 py-1.5 text-sm font-medium"
+        onClick={handleSubmit}
+        disabled={pending || !action}
+        className="w-full rounded-xl bg-emerald-600 py-1.5 text-sm font-medium disabled:opacity-50"
       >
-        {submitLabel}
+        {pending ? "…" : submitLabel}
       </button>
     </div>
   );
